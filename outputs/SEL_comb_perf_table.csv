@@ -1,0 +1,25 @@
+Spline,Model,AIC,"RMSE, in-sample","RMSE, nowcast","RMSE, inflection","AUC, in-sample","AUC, nowcast","AUC, inflection"
+None,Mean (no variant era),-4151,0.034,0.0349,0.0434,0.743,0.701,0.66
+None,Mean + variant era,-4175,0.0335,0.0374,0.0471,0.752,0.667,0.636
+None,Mean * variant era,-4230,0.0326,0.0383,0.0507,0.763,0.694,0.602
+None,Mean + st.dev. (no variant era),-4159,0.0338,0.0354,0.0442,0.75,0.696,0.651
+None,Mean + st.dev. + variant era,-4186,0.0333,0.0379,0.0479,0.763,0.666,0.647
+None,(Mean + st.dev.) * variant era,-4256,0.032,0.0396,0.0525,0.78,0.686,0.605
+None,Mean + skew (no variant era),-4149,0.034,0.0351,0.0434,0.743,0.695,0.66
+None,Mean + skew + variant era,-4174,0.0335,0.0376,0.0472,0.752,0.66,0.638
+None,(Mean + skew) * variant era,-4227,0.0325,0.0395,0.0519,0.764,0.683,0.604
+None,Mean + s.d. + skew (no variant era),-4157,0.0338,0.0358,0.0446,0.751,0.689,0.654
+None,Mean + s.d. + skew + variant era,-4184,0.0333,0.0383,0.0482,0.763,0.659,0.646
+None,(Mean + s.d. + skew) * variant era,-4255,0.0319,0.0412,0.0534,0.783,0.677,0.604
+Cubic,Mean (no variant era),-4229,0.0326,0.0356,0.0466,0.755,0.715,0.668
+Cubic,Mean + variant era,-4258,0.0321,0.0413,0.062,0.78,0.705,0.635
+Cubic,Mean * variant era,-4296,0.0313,0.553,1.24,0.796,0.707,0.612
+Cubic,Mean + st.dev. (no variant era),-4238,0.0324,0.036,0.0476,0.763,0.709,0.662
+Cubic,Mean + st.dev. + variant era,-4272,0.0318,0.0414,0.0619,0.789,0.703,0.64
+Cubic,(Mean + st.dev.) * variant era,-4344,0.0304,0.552,1.23,0.811,0.691,0.649
+Cubic,Mean + skew (no variant era),-4232,0.0325,0.0366,0.0479,0.755,0.706,0.664
+Cubic,Mean + skew + variant era,-4261,0.0319,0.042,0.0627,0.78,0.698,0.633
+Cubic,(Mean + skew) * variant era,-4339,0.0303,0.554,1.24,0.8,0.682,0.602
+Cubic,Mean + s.d. + skew (no variant era),-4240,0.0323,0.0371,0.0491,0.762,0.705,0.67
+Cubic,Mean + s.d. + skew + variant era,-4274,0.0317,0.0422,0.0629,0.789,0.697,0.638
+Cubic,(Mean + s.d. + skew) * variant era,-4379,0.0296,0.0545,0.0926,0.814,0.672,0.649

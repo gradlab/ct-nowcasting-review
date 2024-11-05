@@ -1,0 +1,322 @@
+---
+title: "LAC data supplemental information"
+author: "Tse Yang Lim"
+date: "2024-04-15"
+output:
+  html_document:
+    df_print: paged
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,message=FALSE,warning=FALSE)
+```
+
+```{r load functions, Ct data, and specify shared constants, include=FALSE}
+## Read in analysis-specific settings
+key <- "LAC"
+source("./code/0_code_settings.R")
+
+## Read in main dataset
+raw_dat <- haven::read_sas(str_glue("{dat_folder}/lac_fulgent_ct.sas7bdat"))
+
+dat <- raw_dat %>%
+  rename(onset_date = symptom_begin, 
+         zip = Zip, 
+         coll_date = elr_col, 
+         gender = Sex, 
+         race = Reported_Race, 
+         hisp_eth = Ethnicity) %>% 
+  mutate(onset_date = replace(onset_date, onset_date == "NA", NA), 
+         onset_date = as_date(onset_date), 
+         onset_date = replace(onset_date, onset_date == "1960-01-01", NA),  # Replace erroneous onset date entries
+         across(starts_with("symptom"),  ~ case_when(.x == "Y" ~ TRUE, 
+                                                     .x == "N" ~ FALSE, 
+                                                     .x == "S" ~ NA,  # Records with symptoms skipped reported none
+                                                     TRUE ~ NA))) %>% 
+  mutate(symptomatic = if_any(starts_with("symptom")),  # Classify as symptomatic if any symptoms shown
+         age = replace(age, age > 110, NA),  # Convert erroneous ages to NA
+         across(c(vax_status, vax_status_addtl, gender, race), as_factor), 
+         hisp_eth = case_when(hisp_eth == "Hispanic or Latino" ~ TRUE, 
+                              hisp_eth == "Not Hispanic or Latino" ~ FALSE, 
+                              TRUE ~ NA)) %>% 
+  mutate(gender = case_when(gender == "Female" ~ "F",
+                            gender == "Male" ~ "M", 
+                            gender %in% c("Other", "Transgender (F to M)", "Transgender (M to F)", "Unknown", "") ~ NA, 
+                            TRUE ~ gender), 
+         race = fct_collapse(race, "Other" = c("Other", "Multiple Race"), NULL = c("", "Unknown")), 
+         vaccinated = fct_recode(vax_status_addtl,
+                                 "Unvax" = "0_Unvaccinated", 
+                                 "Partial" = "1_Partially Vaccinated", 
+                                 "Full" = "2_Complete primary series; no additional/booster dose", 
+                                 "Boost" = "3_Complete primary series + additional/booster dose"), 
+         naive = case_when(vaccinated == "Unvax" & NCVConfReinfect == "" ~ TRUE, 
+                           TRUE ~ FALSE), 
+         coll_wk = floor_date(coll_date,"week"), 
+         coll_mo = floor_date(coll_date,"month"), 
+         coll_date_int = as.numeric(coll_date), 
+         Ct_value = pmin(N1_CT, N2_CT, SC2N_CT, na.rm=TRUE)) %>% 
+  select(-starts_with("symptom_"), -c("loinc_test", "vax_status", "vax_status_addtl")) %>% 
+  select(-starts_with("FACILITY"))
+```
+
+### Identifying first positive results for each case
+
+```{r}
+## Add within-person positive test number index
+dat <- dat %>% 
+  group_by(person_id_case) %>%
+  arrange(coll_date, .by_group=TRUE) %>%  # Order by date within each individual
+  mutate(pos_idx = row_number(person_id_case)) %>%  # Add within-person test index
+  group_by(incid_case) %>% 
+  arrange(coll_date, .by_group=TRUE) %>%  # Order by date within each case
+  mutate(pos_idx_case = row_number(incid_case))  # Add within-case test index
+
+## Add days between positive tests
+dat <- dat %>% 
+  ungroup() %>% 
+  arrange(person_id_case, coll_date) %>% 
+  mutate(lag_coll_date = lag(coll_date), 
+         not_first = case_when(pos_idx > 1 ~ 1)) %>% 
+  mutate(days_btwn_pos = (coll_date - lag_coll_date) * not_first) %>% 
+  select(-c("lag_coll_date", "not_first"))
+
+## Subset data with sequential measurements within course of case
+mult_test_indices <- dat %>% filter(pos_idx_case > 1)
+mult_test_cases <- dat %>% filter(incid_case %in% (mult_test_indices$incid_case))
+```
+
+The full dataset contains `r nrow(dat)` positive test results, each with individual and infection episode identifiers. Of these, `r nrow(mult_test_indices)` were non-first or repeat positives for a given infection episode; dropping these left `r nrow(dat %>% filter(pos_idx_case == 1))` results reporting the first Ct value for each infection episode.
+
+```{r}
+### FOR ANALYSIS, NOT SAVED TO CLEAN DATASET
+## Generate a calendar
+data_calendar <- expand_grid(date=seq(min(dat$coll_date),max(dat$coll_date),by="1 day"))
+data_calendar <- data_calendar %>% 
+  mutate(coll_date_int = as.numeric(date)) %>% 
+  mutate(day_of_wk = wday(date,label=TRUE))
+
+## Add CDC MMWR epi_wk indicator and cumulative EpiWeeks since 2020
+data_calendar <- data_calendar %>% 
+  mutate(epi_yr = MMWRweek::MMWRweek(date)$MMWRyear, 
+         epi_wk = MMWRweek::MMWRweek(date)$MMWRweek) %>% 
+  mutate(epi_wk_comb = case_when(epi_yr == 2021 ~ epi_wk + 53, 
+                                 epi_yr == 2022 ~ epi_wk + 53 + 52, 
+                                 epi_yr == 2023 ~ epi_wk + 53 + 52 + 52, 
+                                 TRUE ~ epi_wk))
+
+## Create weekly version with start-of-week dates
+wk_data_calendar <- data_calendar %>% group_by(epi_wk_comb) %>% summarise(across(-day_of_wk, ~ min(.)))
+
+dat <- dat %>% left_join(data_calendar, by=c("coll_date"="date", "coll_date_int"="coll_date_int"))
+
+## Split into variant eras
+dat <- dat %>% add_variant_eras(variant_eras, coll_date)
+
+## Identify only positive results w/ Ct values
+dat_pos <- dat %>%
+  filter(pos_idx_case == 1) %>% 
+  filter(Ct_value != 45)
+```
+
+A further `r nrow(dat %>% filter(pos_idx_case == 1 & Ct_value == 45))` results include reported Ct values of exactly 45, distinctly above the highest other Ct values reported (approx. 40) and likely indicating an erroneous result. These results were dropped as well, leaving `r nrow(dat_pos)` results in the final sample for this analysis.
+
+### Sample demographics
+
+The final sample includes positive results from `r n_distinct(dat_pos$person_id_case)` individuals of age 0 to 90+, with most between approx. 15-60. The age distribution of positive individuals was consistent over the course of the pandemic. Slightly over half of the positive results were from females. Weekly totals of positive results varied over the course of the pandemic, somewhat reflecting the multiple waves of infections observed more broadly, especially the 2021 and 2022 Alpha / Omicron winter surges; sample sizes were relatively smaller from 2022 onward, possibly reflecting increased availability of self-administered rapid antigen tests.
+
+```{r}
+p_age <- ggplot(dat_pos) + geom_histogram(aes(x=age),binwidth=1) + scale_fill_grey() + theme_bw()
+p_sex <- ggplot(dat_pos) + geom_bar(aes(x=gender)) + scale_fill_grey() + theme_bw()
+p_date <- ggplot(dat_pos) + geom_bar(aes(x=coll_wk)) + scale_fill_grey() + xlab("Collection week") + theme_bw()
+p_age_monthly <- ggplot(dat_pos) + 
+  geom_violin(aes(x=coll_mo, y=age, group=coll_mo), scale="width", draw_quantiles=c(0.5), fill='grey70') + 
+  ylab("Age") + 
+  xlab("Collection date") +
+  theme_bw()
+
+p_age + p_sex + p_age_monthly + p_date + plot_layout(ncol=2)
+```
+
+### Assays and Ct values
+
+All results included in this dataset include Ct values, derived from two RT-qPCR assays were used; before mid-Nov 2020, analyses used exclusively LOINC 94531-1 [NAME?] targeting N1 and N2 genes, while subsequently the vast majority of analyses used LOINC 94533-7 [NAME?] targeting the SC2N gene.
+
+```{r}
+p_assay_date <- dat_pos %>% ggplot() + geom_bar(aes(x=coll_wk, fill=TESTCODE)) + xlab("Collection week")
+
+p_assay_date
+```
+
+For LOINC 94531-1 results, we used the the lower of the N1/N2 Ct values (N2 in ~90% of cases). Recorded N1/N2 Ct values range from approx. 6-39, while the SC2N Ct values range from approx. 8-37.
+
+```{r}
+dat_pos %>% filter(Ct_value != 45) %>% group_by(TESTCODE) %>% summarise(min_Ct = min(Ct_value), median_Ct = median(Ct_value), max_Ct = max(Ct_value))
+```
+
+
+### Symptom status and testing delays
+
+Symptom status was reported for approximately 75% (`r nrow(dat_pos %>% filter(!is.na(symptomatic)))` results) of the sample, although none of the results include symptom status prior to late Aug 2020. After that, the proportion reporting symptom status is around 75-80% for most weeks, especially from 2022 onward. Among those with symptom status reported, the fraction reported symptomatic for COVID-19 is consistently around 75% (56% of the full sample; `r nrow(dat_pos %>% filter(symptomatic == TRUE))` results). 
+
+```{r symptom status availability, fig.height=8, fig.width=12}
+p_symp_stat <- dat_pos %>% 
+  mutate(has_symp = case_when(symptomatic == TRUE ~ "Symptomatic", 
+                              symptomatic == FALSE ~ "Asymptomatic", 
+                              TRUE ~ "No data")) %>% 
+  mutate(has_symp = factor(has_symp, levels=c("No data", "Asymptomatic", "Symptomatic"))) %>% 
+  ggplot() +
+  geom_bar(aes(x = coll_wk, fill = has_symp), position='fill') +
+  geom_line(data = dat_pos %>%
+              group_by(coll_wk) %>%
+              summarise(count = n()) %>%
+              mutate(scaled_count = count / max(count)),
+            aes(x = coll_wk, y = scaled_count)) +
+  xlab("Collection week") + 
+  ylab("Proportion of results")
+p_symp_stat
+```
+
+
+We calculate testing delays as the difference between the time of specimen collection and symptom onset. Plotting the distribution of testing delays, as expected, the vast majority are short (a few days). However, there are small clusters of testing delays at approx. 365 and 730 days, i.e. 1 and 2 years. We assume that these longer delays reflect data entry errors in recording symptom onset dates, and thus correct them by adjusting the onset dates by +1 or +2 years.
+
+```{r}
+dat_pos <- dat_pos %>% 
+  mutate(test_delay = coll_date - onset_date)
+
+ggplot(dat_pos %>% filter(test_delay <= 40)) + geom_bar(aes(x=test_delay)) +
+ggplot(dat_pos %>% filter(test_delay <= 395 & test_delay > 355)) + geom_bar(aes(x=test_delay)) +
+ggplot(dat_pos %>% filter(test_delay <= 760 & test_delay > 720)) + geom_bar(aes(x=test_delay))
+```
+
+After correcting for these presumptive data entry errors, while a handful of long recorded testing delays remain, the majority of testing delays fall between 1 and 10 days, with a peak of around 2-4 days between symptom onset and specimen collection.
+
+```{r}
+dat_pos <- dat_pos %>% 
+  mutate(onset_date = case_when(test_delay >= 725 ~ as_date(onset_date + 730), 
+                                test_delay >= 360 ~ as_date(onset_date + 365), 
+                                TRUE ~ onset_date)) %>% 
+  mutate(test_delay = coll_date - onset_date)
+
+p_test_delay <- ggplot(dat_pos) + geom_bar(aes(x=test_delay))
+p_test_delay_zoom <- ggplot(dat_pos %>% filter(test_delay <= 30)) + geom_bar(aes(x=test_delay))
+
+p_test_delay / p_test_delay_zoom
+```
+
+The distribution of testing delays is fairly consistent over time, with no strong month-to-month variation. Average testing delays were slightly longer in 2020 and during the two major winter peaks, potentially indicating some test capacity limitations.
+
+```{r}
+p_test_delay_monthly <- dat_pos %>% 
+  filter(test_delay <= 30) %>% 
+  ggplot() +
+  geom_violin(aes(x=coll_mo,y=test_delay,group=coll_mo),scale="width",draw_quantiles=c(0.5),fill="grey70") + 
+  scale_x_date(breaks="1 month") +
+  theme(axis.text.x=element_text(angle=45,hjust=1)) +
+  ggtitle("Testing delays over time by month") + 
+  scale_y_continuous(limits = c(0, 30)) + 
+  xlab("Collection month")
+p_test_delay_monthly
+```
+
+
+
+```{r}
+## LAC only - calculate proportion naive
+prop_naive_daily <- dat_pos %>%
+  arrange(coll_date) %>% 
+  complete_dates(coll_date, c()) %>% 
+  mutate(prop_naive = zoo::rollapplyr(naive, rollmean_window, mean, na.rm=TRUE, partial=TRUE)) %>% 
+  group_by(coll_date) %>% 
+  summarise(prop_naive = last(prop_naive))
+prop_naive_weekly <- dat_pos %>%
+  group_by(coll_wk) %>%
+  summarise(prop_naive = mean(naive))
+
+## Clean up
+remove(raw_dat, data_calendar, wk_data_calendar, mult_test_indices)
+```
+
+
+### Ct by test delay
+For symptomatic cases, we can examine the distribution of Ct values by testing delay (time from onset of symptoms to sample collection). As symptom onset typically coincides with peak viral load (though may be slightly earlier in people with past immunological exposure), this distribution should approximate the clearance phase of the viral load trajectory, sampled across thousands of individuals.
+
+While there is very wide variation in individual Ct values over time since symptom onset, overall there is some noticeable decline, with lower viral loads the longer the testing delay. This pattern is consistent over the course of the pandemic, though clearance times appear to be shortening in its later stages.
+
+```{r plot Ct values against test delay}
+p_Ct_test_delay <- dat_pos %>% 
+  filter(test_delay <= 30) %>% 
+  ggplot() +
+  geom_jitter(aes(x=test_delay, y=Ct_value), alpha=0.05, height=0, width=0.45) + 
+  geom_smooth(aes(x=test_delay, y=Ct_value), method="loess", span=0.3) +
+  scale_y_continuous(trans="reverse") +
+  ggtitle("Ct values by test delay")
+
+p_Ct_test_delay_mo <- dat_pos %>% 
+  filter(test_delay <= 30) %>% 
+  ggplot() +
+  geom_jitter(aes(x=test_delay, y=Ct_value), alpha=0.05, height=0, width=0.45) + 
+  # geom_smooth(aes(x=test_delay, y=Ct_value), method="loess", span=0.3) +
+  scale_y_continuous(limits=c(40, 5), trans="reverse") + 
+  facet_wrap(~ coll_mo) +
+  ggtitle("Ct values by test delay over time")
+
+p_Ct_test_delay
+p_Ct_test_delay_mo
+```
+
+Stratifying individual results by past immunological exposure to SARS-CoV-2 (through vaccination or past infection) yields a potential explanation for this pattern. Consistent with previous observations, vaccinated or recovered individuals clear infections slightly faster, with more rapid declines in viral load. Over the course of the pandemic, the majority of individuals testing positive shift from being immunologically naive early on to previously infected or vaccinated later on, resulting in the shift in the aggregated distribution.
+
+The approximation of viral kinetics and the shift resulting from immunological exposure are even clearer when we include repeat tests (previously excluded for purposes of nowcasting analysis), as these comprise a substantial fraction of the observations later in individuals' viral load trajectories (i.e. the right tail of the distribution).
+
+```{r plot Ct values against test delay by immune history}
+p_Ct_test_delay_imh <- dat_pos %>% 
+  filter(test_delay <= 30) %>% 
+  ggplot() +
+  geom_jitter(aes(x=test_delay, y=Ct_value, colour=naive), alpha=0.05, height=0, width=0.45) + 
+  geom_smooth(aes(x=test_delay, y=Ct_value, colour=naive), method="loess", span=0.3) +
+  scale_y_continuous(trans="reverse") + 
+  scale_colour_manual(values=c("red", "blue")) +
+  ggtitle("Ct values by test delay and immune history")
+
+p_Ct_test_delay_mo_imh <- dat_pos %>% 
+  filter(test_delay <= 30) %>% 
+  ggplot() +
+  geom_jitter(aes(x=test_delay, y=Ct_value, colour=naive), alpha=0.05, height=0, width=0.45) + 
+  # geom_smooth(aes(x=test_delay, y=Ct_value, colour=naive), method="loess", span=0.3) +
+  scale_y_continuous(limits=c(40, 5), trans="reverse") + 
+  scale_colour_manual(values=c("red", "blue")) + 
+  facet_wrap(~ coll_mo) +
+  ggtitle("Ct values by test delay and immune history over time")
+
+dat <- dat %>% 
+  mutate(test_delay = coll_date - onset_date) %>% 
+  mutate(onset_date = case_when(test_delay >= 725 ~ as_date(onset_date + 730), 
+                                test_delay >= 360 ~ as_date(onset_date + 365), 
+                                TRUE ~ onset_date)) %>% 
+  mutate(test_delay = coll_date - onset_date) %>% 
+  filter(Ct_value != 45)
+
+p_Ct_test_delay_imh_rep <- dat %>% 
+  filter(test_delay <= 30) %>% 
+  ggplot() +
+  geom_jitter(aes(x=test_delay, y=Ct_value, colour=naive), alpha=0.05, height=0, width=0.45) + 
+  geom_smooth(aes(x=test_delay, y=Ct_value, colour=naive), method="loess", span=0.3) +
+  scale_y_continuous(trans="reverse") + 
+  scale_colour_manual(values=c("red", "blue")) +
+  ggtitle("Ct values by test delay and immune history, incl. repeats")
+
+p_Ct_test_delay_mo_imh_rep <- dat_pos %>% 
+  filter(test_delay <= 30) %>% 
+  ggplot() +
+  geom_jitter(aes(x=test_delay, y=Ct_value, colour=naive), alpha=0.05, height=0, width=0.45) + 
+  # geom_smooth(aes(x=test_delay, y=Ct_value, colour=naive), method="loess", span=0.3) +
+  scale_y_continuous(limits=c(40, 5), trans="reverse") + 
+  scale_colour_manual(values=c("red", "blue")) + 
+  facet_wrap(~ coll_mo) +
+  ggtitle("Ct values by test delay and immune history over time, incl. repeats")
+
+
+p_Ct_test_delay_imh
+p_Ct_test_delay_mo_imh
+p_Ct_test_delay_imh_rep
+p_Ct_test_delay_mo_imh_rep
+```

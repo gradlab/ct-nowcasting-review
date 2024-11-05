@@ -1,0 +1,212 @@
+---
+title: "MGB data supplemental information"
+author: "Tse Yang Lim"
+date: "2024-04-15"
+output:
+  html_document:
+    df_print: paged
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,message=FALSE,warning=FALSE)
+```
+
+```{r load functions, Ct data, and specify shared constants, include=FALSE}
+## Read in analysis-specific settings
+key <- "MGB"
+source("./code/0_code_settings.R")
+
+## Assay specifications
+assays <- c(BRD = "Broad SARS-CoV-2", 
+            CPD = "Cepheid SARS-CoV-2", 
+            CPM = "Cepheid SARS-CoV-2/flu/RSV", 
+            HLF = "Hologic Fusion SARS-CoV-2", 
+            RCB = "Roche cobas SARS-CoV-2", 
+            RCM = "Roche cobas SARS-CoV-2/flu", 
+            RLM = "Roche Liat SARS-CoV-2/flu")
+
+## Read in main dataset
+dat <- read_csv(str_glue("{dat_folder}/MGB_clean.csv"))
+```
+
+### Sample size and test positivity
+
+The full dataset contains `r nrow(dat)` test results, of which `r nrow(dat %>% filter(result == "Positive"))` are positive. Test positivity was generally under 10%, though higher during major infection waves.
+
+```{r}
+## Add collection month and integer date
+dat <- dat %>% 
+    mutate(coll_mo = floor_date(coll_date,"month"), 
+           coll_date_int = as.numeric(coll_date))
+
+## Preliminary data cleaning
+dat <- dat %>%
+  mutate(gender = case_when(gender %in% c('U', 'X') ~ NA,
+                            TRUE ~ gender),
+         age = replace(age, age > 110, NA),  # Convert erroneous ages to NA
+         hospital = fct_collapse(hospital, 'OTHER' = c(
+           'SRB', 'SHCC', 'SHC', 'SHB', 'MVH', 'MEE', 'MCL', 'DFC', 'ICA', 'PMA')),
+         specimen_type = fct_collapse(specimen_type, 'Other' = c(
+           'Other', 'Oropharynx', 'NP/OP', 'Not recorded', 'Lower respiratory tract')),
+         loc_cat = fct_collapse(loc_cat, "O" = c("OP", "OS"), "I" = "IP", "E" = "ER"),
+         assay = as_factor(assay),  # Convert assay to factor w/ abbreviations
+         assay = fct_recode(assay, !!!assays)) %>%
+  rename(zip = zipcode,  # Rename columns to standard names
+         loc_type = loc_cat,
+         location = loc_specific,
+         spec_type = specimen_type,
+         Ct_value = Ct_min,
+         coll_wk = coll_week)
+
+## Calculate test positivity
+prop_pos_daily <- dat %>%
+  mutate(positive = result == "Positive") %>%
+  group_by(coll_date) %>%
+  summarise(total = n(), pos = sum(positive)) %>%
+  mutate(roll_total = zoo::rollsumr(total, rollmean_window, fill=NA),
+         roll_pos = zoo::rollsumr(pos, rollmean_window, fill=NA),
+         prop_pos = roll_pos / roll_total) %>%
+  select(coll_date, prop_pos)
+
+prop_pos_weekly <- dat %>%
+  mutate(positive = result == "Positive") %>%
+  group_by(coll_wk) %>%
+  summarise(prop_pos = mean(positive))
+
+p_date_all <- ggplot(dat) + 
+  geom_bar(aes(x=coll_wk, fill=result)) + 
+  geom_line(data=prop_pos_weekly, aes(x=coll_wk, y=prop_pos*100000), col="blue") +
+  scale_y_continuous(name="Tests per week", sec.axis = sec_axis(~./100000, name="Weekly proportion positive")) +
+  scale_fill_manual(name="Result", labels=c("Negative", "Positive"), values=c("grey70", "grey20")) + 
+  theme_bw() + 
+  theme(axis.title.x=element_blank(), legend.position="bottom")
+p_date_all
+```
+
+
+### Identifying first positive results for each case
+
+```{r, echo=TRUE}
+## Identify individuals with repeated positive results
+rep_pos <- dat %>% 
+  filter(result == "Positive") %>% 
+  mutate(lag_person = lag(person_id), lag_date = lag(coll_date), lag_index = lag(test_index)) %>% 
+  mutate(is_same = case_when(person_id == lag_person ~ 1), 
+         days_btwn_pos = (coll_date - lag_date) * is_same) %>% 
+  select(-c('lag_person', 'lag_date', 'lag_index', 'is_same')) %>% 
+  filter(!is.na(days_btwn_pos))
+
+## Identify putative repeat positives from same infection
+short_rep_pos <- rep_pos %>% 
+  filter(days_btwn_pos <= 60)
+
+## Identify potential multiple or long infections
+mult_rep <- rep_pos %>% 
+  filter(days_btwn_pos > 60) %>% 
+  group_by(person_id) %>% 
+  summarise(count = n())
+```
+
+Among the positive test results, `r nrow(rep_pos)` were non-first or repeat positives, i.e. second or subsequent positive results for a given individual. Of these repeat positives, we defined single infection episodes as comprising all consecutive positive test results for a given individual with 60 days or fewer between positive tests (regardless of any potential intervening negative test results, which we assumed were false negatives). There were `r nrow(mult_rep)` individuals who had what appeared to be repeat infection episodes (with >60 days between positive results), of which `r nrow(mult_rep %>% filter(count > 1))` individuals had multiple (2 or more) repeat infection episodes thus defined. As we could not rule out long COVID or other idiosyncratic viral kinetics, we drop these `r nrow(mult_rep %>% filter(count > 1))` individuals with multiple apparent infection episodes from the final dataset. 
+
+```{r, echo=TRUE}
+## Filter out multiple (>2) infection individuals
+mult_rep <- mult_rep %>% filter(count > 1)
+
+## Filter out imputed repeat results or long infections
+dat <- dat %>% 
+  filter(!(person_id %in% mult_rep$person_id),  # Exclude multiple infection individuals completely
+         !(sample_id %in% short_rep_pos$sample_id))  # Use sample_id to retain first positives otherwise
+
+```
+
+For individuals whose test results indicate only one or two infection episodes, we retained only the first positive result for each infection episode, yielding `r nrow(dat %>% filter(result == "Positive"))` positive test results. Of these, `r nrow(dat %>% filter(result=="Positive" & is.na(Ct_value)))` did not report Ct values, leaving a final sample of `r nrow(dat %>% filter(result=="Positive" & !is.na(Ct_value)))` Ct values used in this analysis.
+
+```{r}
+## Generate a calendar
+data_calendar <- expand_grid(date=seq(min(dat$coll_date),max(dat$coll_date),by="1 day"))
+data_calendar <- data_calendar %>%
+  mutate(coll_date_int = as.numeric(date)) %>%
+  mutate(day_of_wk = wday(date,label=TRUE))
+
+## Add CDC MMWR epi_wk indicator and cumulative EpiWeeks since 2020
+data_calendar <- data_calendar %>%
+  mutate(epi_yr = MMWRweek::MMWRweek(date)$MMWRyear,
+         epi_wk = MMWRweek::MMWRweek(date)$MMWRweek) %>%
+  mutate(epi_wk_comb = case_when(epi_yr == 2021 ~ epi_wk + 53,
+                                 epi_yr == 2022 ~ epi_wk + 53 + 52,
+                                 epi_yr == 2023 ~ epi_wk + 53 + 52 + 52,
+                                 TRUE ~ epi_wk))
+
+## Create weekly version with start-of-week dates
+wk_data_calendar <- data_calendar %>% group_by(epi_wk_comb) %>% summarise(across(-day_of_wk, ~ min(.)))
+
+dat <- dat %>% left_join(data_calendar, by=c("coll_date"="date"))
+
+## Split into variant eras
+dat <- dat %>% add_variant_eras(variant_eras, coll_date)
+
+## Identify only positive results w/ Ct values
+dat_pos <- dat %>%
+  filter(result == "Positive") %>%
+  filter(!is.na(Ct_value)) %>%
+  filter(Ct_value > 0) %>%
+  mutate(assay = fct_drop(assay)) # Drop unused assay levels
+
+## Clean up
+remove(data_calendar, wk_data_calendar, rep_pos, short_rep_pos, mult_rep)
+
+```
+
+### Sample demographics
+
+The final sample includes results from individuals of age 0 to 90+, with most between approx. 20-75. Mean age of positive individuals varied slightly over the course of the pandemic, being slightly lower through most of 2021 and then rising across 2022-23. Approximately 55% of the positive results were from females. Weekly totals of positive results varied over the course of the pandemic, somewhat reflecting the multiple waves of infections observed more broadly (e.g. 2021 and 2022 Alpha / Omicron winter surges).
+
+```{r}
+p_age <- ggplot(dat_pos) + geom_histogram(aes(x=age),binwidth=1) + scale_fill_grey() + theme_bw()
+p_sex <- ggplot(dat_pos) + geom_bar(aes(x=gender)) + scale_fill_grey() + theme_bw()
+p_date <- ggplot(dat_pos) + geom_bar(aes(x=coll_wk)) + scale_fill_grey() + xlab("Collection week") + theme_bw()
+p_age_monthly <- ggplot(dat_pos) + 
+  geom_violin(aes(x=coll_mo, y=age, group=coll_mo), scale="width", draw_quantiles=c(0.5), fill='grey70') + 
+  ylab("Age") + 
+  xlab("Collection date") +
+  theme_bw()
+
+p_age + p_sex + p_age_monthly + p_date + plot_layout(ncol=2)
+```
+
+### Specimen collection & analysis
+
+Specimens were collected from locations across the MGB hospital system, with most coming from Brigham & Women's Hospital, Massachusetts General Hospital, and the North Shore Medical Center (now Salem Hospital). 8 locations had very few specimens in the dataset, and are pooled for further analysis. Most specimens (`r nrow(dat_pos %>% filter(loc_type=="O"))`) were collected from outpatient visitors, with approximately 20% from ER visits (`r nrow(dat_pos %>% filter(loc_type=="E"))`) and 6% from inpatients (`r nrow(dat_pos %>% filter(loc_type=="I"))`).
+
+Specimens were collected from nasal and nasopharyngeal swabs (approx. 2:1 ratio), and processed using seven different RT-qPCR platform/assay combinations (BRD: Broad SARS-CoV-2, CPD: Cepheid SARS-CoV-2, CPM: Cepheid SARS-CoV-2/flu/RSV, HLF: Hologic Fusion SARS-CoV-2, RCB: Roche cobas SARS-CoV-2, RCM: Roche cobas SARS-CoV-2/flu, RLM: Roche Liat SARS-CoV-2/flu).
+
+```{r}
+p_hosp <- ggplot(dat_pos) + geom_bar(aes(y=hospital)) + theme_bw() + ylab("Hospital") + theme(axis.text.y=element_text(size=6))
+p_loc <- ggplot(dat_pos) + geom_bar(aes(y=loc_type)) + theme_bw() + ylab("Location type") + theme(axis.text.y=element_text(size=6))
+p_spec <- ggplot(dat_pos) + geom_bar(aes(y=spec_type)) + theme_bw() + ylab("Specimen type") + theme(axis.text.y=element_text(size=6))
+p_plat <- ggplot(dat_pos) + geom_bar(aes(y=assay)) + theme_bw() + ylab("Platform / assay") + theme(axis.text.y=element_text(size=6))
+
+p_hosp + p_loc + p_spec + p_plat + plot_layout(ncol=2)
+```
+
+The different platforms / assays target different SARS-CoV-2 genes, including the E/N/N1/N2/ORF1ab genes [ADD TABLE]. For our main analysis, Ct values were pooled across platforms/assays, using the lowest Ct value reported for each specimen.
+
+```{r}
+p_spec_loc_assay <- dat_pos %>% 
+  mutate(loc_type = fct_relevel(loc_type, c("O", "E", "I")), 
+         loc_type = fct_recode(loc_type, Outpatient="O", `Emergency Room`="E", Inpatient="I"), 
+         assay = fct_recode(assay, !!!(setNames(names(assays), assays)))) %>% 
+  ggplot() + 
+  geom_bar(aes(y=spec_type, fill=assay)) + 
+  facet_wrap(~loc_type, ncol=1) + 
+  ylab("Screening location & swab type") +
+  scale_fill_discrete(name = "Platform/assay") +
+  theme_main + 
+  theme(axis.title.x = element_blank(), 
+        legend.position = c(0.8, 0.2), 
+        legend.background = element_rect(fill="white"))
+
+save_bak(p_spec_loc_assay,
+         str_glue("./figures/{key}_test_details.{figext}"), 
+         width=8, height=6, units="in", dpi=300)
+```

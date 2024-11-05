@@ -1,0 +1,4 @@
+Dataset,AIC,"RMSE, in-sample","RMSE, nowcast","RMSE, inflection","AUC, in-sample","AUC, nowcast","AUC, inflection"
+MGB,-3493,0.0451,0.0523,0.0645,0.785,0.723,0.722
+LAC,-2660,0.0335,0.039,0.0471,0.843,0.784,0.772
+TFT,-1691,0.0415,0.0497,0.0591,0.754,0.685,0.584

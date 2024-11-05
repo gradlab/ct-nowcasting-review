@@ -1,0 +1,7 @@
+Dataset,Model,AIC,BIC,"RMSE, in-sample","RMSE, nowcast","RMSE, inflection","RMSE, fixed test","Rho, in-sample","Rho, nowcast","Rho, inflection","Rho, fixed test","Coverage, in-sample","Coverage, nowcast","Coverage, inflection","Coverage, fixed test","AUC, in-sample","AUC, nowcast","AUC, inflection","AUC, fixed test"
+MGB,Base model,-3493,-3433,0.0451,0.0523,0.0645,0.047,0.523,0.398,0.333,0.44,0.949,0.929,0.873,0.933,0.785,0.723,0.722,0.754
+MGB,Outpatient only,-3432,-3358,0.0439,0.0494,0.0653,0.041,0.546,0.336,0.234,0.462,0.947,0.941,0.903,0.95,0.804,0.724,0.696,0.763
+LAC,Base model,-2660,-2585,0.0335,0.039,0.0471,0.0458,0.649,0.556,0.394,0.573,0.954,0.912,0.837,0.884,0.843,0.784,0.772,0.724
+LAC,Symptom stratified,-2005,-1914,0.0326,0.0454,0.0507,0.0648,0.728,0.45,0.369,0.313,0.949,0.846,0.744,0.577,0.907,0.829,0.765,0.5
+LAC,Asymptomatic only,-1986,-1916,0.0335,0.0415,0.0497,0.0487,0.693,0.55,0.399,0.535,0.932,0.866,0.8,0.856,0.88,0.809,0.784,0.5
+LAC,Immunologically naive only,-2556,-2500,0.0344,0.0401,0.0474,0.055,0.62,0.489,0.42,0.31,0.944,0.896,0.821,0.776,0.819,0.761,0.754,0.475

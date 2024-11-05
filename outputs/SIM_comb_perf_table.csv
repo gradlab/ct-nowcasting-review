@@ -1,0 +1,19 @@
+Model,AIC,"RMSE, in-sample","RMSE, nowcast","RMSE, inflection","AUC, in-sample","AUC, nowcast","AUC, inflection"
+Ideal condition,-5314,0.0196,0.0205,0.0254,0.912,0.875,0.829
+Realistic kinetics,-4683,0.0264,0.0296,0.0401,0.877,0.85,0.799
+Realistic variation,-4788,0.0251,0.0274,0.0354,0.871,0.822,0.774
+Realistic sampling,-4780,0.0252,0.0271,0.0366,0.849,0.812,0.748
+Baseline condition,-4174,0.0335,0.0376,0.0483,0.752,0.66,0.612
+High variation,-3940,0.0375,0.0411,0.0537,0.636,0.535,0.548
+Symmetric kinetics,-4470,0.0292,0.0309,0.0378,0.823,0.78,0.727
+"Baseline, asymptomatic only",-968,0.0414,0.0533,0.0451,0.697,0.617,0.521
+"Realistic sampling, asymptomatic",-1707,0.029,0.0364,0.0368,0.84,0.766,0.647
+Ideal condition,-5349,0.0191,0.0206,0.0254,0.916,0.867,0.81
+Realistic kinetics,-4832,0.0245,0.0286,0.0391,0.889,0.841,0.771
+Realistic variation,-4871,0.024,0.0302,0.0428,0.878,0.822,0.773
+Realistic sampling,-4893,0.0237,0.027,0.0373,0.865,0.824,0.751
+Baseline condition,-4261,0.0319,0.042,0.0592,0.78,0.698,0.588
+High variation,-3984,0.0365,0.0404,0.0523,0.668,0.553,0.574
+Symmetric kinetics,-4548,0.0279,0.0305,0.0379,0.831,0.779,0.72
+"Baseline, asymptomatic only",-1016,0.0373,0.0538,0.0475,0.857,0.667,0.645
+"Realistic sampling, asymptomatic",-1767,0.0264,0.0419,0.0474,0.877,0.772,0.663

@@ -16,6 +16,7 @@ Contains all `R` scripts used for data cleaning, analysis, and graphing; see [Re
 Contains information assembled from publicly available data used in the analysis, as well as de-identified record-level versions of the original data used in this analysis **(NOTE TO EDITORS/REVIEWERS: We are awaiting final approval for data sharing from our data providers, and will update this repo with the de-identified data as soon as possible.)**:
 1. Reported COVID-19 cases and deaths for Massachusetts, from the [Massachusetts Department of Public Health COVID-19 dashboard](https://www.mass.gov/info-details/covid-19-reporting)
 2. Reported COVID-19 cases and deaths for Los Angeles County, from the [LAC Department of Public Health COVID-19 dashboard](http://dashboard.publichealth.lacounty.gov/covid19_surveillance_dashboard)
+
 **NOTE: NOT YET SHARED:**
 3. Ct values from Mass General Brigham hospital system
 4. Ct values from LAC municipal COVID-19 testing

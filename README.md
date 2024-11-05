@@ -18,6 +18,7 @@ Contains information assembled from publicly available data used in the analysis
 2. Reported COVID-19 cases and deaths for Los Angeles County, from the [LAC Department of Public Health COVID-19 dashboard](http://dashboard.publichealth.lacounty.gov/covid19_surveillance_dashboard)
 
 **NOTE: NOT YET SHARED:**
+
 3. Ct values from Mass General Brigham hospital system
 4. Ct values from LAC municipal COVID-19 testing
 5. Ct values from Tufts Medical Center outpatient testing
